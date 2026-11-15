@@ -3,10 +3,15 @@ title: "archy-459-week-4.qmd"
 format: html
 ---
 ## How good is the forest, and how do you know?
-76% improments tells us that forest is pretty good at predicting bsm marks in this data set but consistent enough to draw conclusions about any particular mark.
+76% improvements tells us that forest is pretty good at predicting bsm marks in this data set but consistent enough to draw
+conclusions about any particular mark.
 
 ## Where does the forest go wrong, and what are the archaeological implications?
-Trample marks were misclassified as cut marks in 56% of cases, with an oob accuracy of 19% overall. It can be seen in the oob error chart that trample mark predictions lost accuracy continuously as more trees were added. This suggests to me that the model was training to classify cut trample mark observations as cuts. The model could consistently classify cut vs. tooth marks (95.5% oob accuracy). Because 75% of observations in this set are cut or tooth marks the model will be right in almost 75% cases by guessing between these two. This seriously undermines the models usefulness as cut marks are the primary target for identification.
+Trample marks were misclassified as cut marks in 56% of cases, with an oob accuracy of 19% overall. It can be seen in the oob error
+chart that trample mark predictions lost accuracy continuously as more trees were added. This suggests to me that the model was
+training to classify cut trample mark observations as cuts. The model could consistently classify cut vs. tooth marks (95.5% oob
+accuracy). Because 75% of observations in this set are cut or tooth marks the model will be right in almost 75% cases by guessing
+between these two. This seriously undermines the models usefulness as cut marks are the primary target for identification.
 
 ```{r}
 #| label: setup
