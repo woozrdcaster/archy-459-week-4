@@ -1,0 +1,168 @@
+---
+title: "archy-459-week-4.qmd"
+format: html
+---
+## How good is the forest, and how do you know?
+76% improments tells us that forest is pretty good at predicting bsm marks in this data set but consistent enough to draw conclusions about any particular mark.
+
+## Where does the forest go wrong, and what are the archaeological implications?
+Trample marks were misclassified as cut marks in 56% of cases, with an oob accuracy of 19% overall. It can be seen in the oob error chart that trample mark predictions lost accuracy continuously as more trees were added. This suggests to me that the model was training to classify cut trample mark observations as cuts. The model could consistently classify cut vs. tooth marks (95.5% oob accuracy). Because 75% of observations in this set are cut or tooth marks the model will be right in almost 75% cases by guessing between these two. This seriously undermines the models usefulness as cut marks are the primary target for identification.
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(tidymodels)
+library(randomForest)
+
+tidymodels_prefer()
+
+```
+```{r}
+# Column names are kept exactly as they appear in the CSV.
+marks <- read_csv("data sheet 3.csv") |>
+  mutate(Trace.Type = factor(str_to_lower(Trace.Type)))  # console: glimpse(marks)
+```
+
+```{r}
+#| label: split
+
+# 80/20 split, stratified by mark type
+set.seed(459)
+marks_split <- initial_split(marks, prop = 0.80, strata = Trace.Type)
+marks_train <- training(marks_split)
+marks_test  <- testing(marks_split)
+```
+
+```{r}
+#| label: boxplots
+#| fig-cap: you can see that trample and cut marks fall close together which may provide confusion as there are many more cut marks included in the data.
+
+# Measurements only: drop the two character columns, then reshape long
+marks_train |>
+  select(-`Experimental Context`, -Effector.Char.1, -Effector.Char.2) |>
+  pivot_longer(
+    cols = -Trace.Type,
+    names_to = "feature",
+    values_to = "measurement"
+  ) |>
+  ggplot(aes(x = Trace.Type, y = measurement, fill = Trace.Type)) +
+  geom_boxplot() +
+  facet_wrap(vars(feature), scales = "free_y") +
+  scale_y_log10() +
+  labs(x = "Trace type", y = "Measurement (log10 scale)", fill = "Trace type") +
+  theme_minimal()
+```
+
+```{r}
+#| label: baseline
+
+# Share of the training marks in each class
+class_props <- 
+  marks_train |>
+  count(Trace.Type) |>
+  mutate(prop = n / sum(n)) # show in console
+
+baseline_accuracy <- round(max(class_props$prop), 2)#0.44
+```
+
+Baseline accuracy is `r baseline_accuracy`.
+
+```{r}
+#| label: recipe
+
+# Trace.Type is the outcome; the text columns become metadata, leaving the 12 measures as predictors
+marks_rec <- # console: marks_rec to check that the number of predictors is 12
+  recipe(Trace.Type ~ .,
+        data = marks_train) |>
+  update_role(all_nominal_predictors(),
+              new_role = "metadata")
+```
+
+```{r}
+#| label: rf-one
+
+# Model specification: a random forest with 500 trees, 3 measures tried per split.
+# We reuse this model spec for most of the lab.
+rf_spec <- 
+  rand_forest(mtry = 3, trees = 500) |>
+  set_engine("randomForest",
+             importance = TRUE) |>  # needed for the importance plot
+  set_mode("classification")
+
+# Fit recipe + forest to the whole training set
+set.seed(459)
+rf_one <- workflow(marks_rec,
+                   rf_spec) |>
+  fit(marks_train)
+
+rf_engine <-  # console: look at rf_engine
+  extract_fit_engine(rf_one)
+```
+
+```{r}
+#| label: rf-one-accuracy
+#| fig-cap: The OOB accuracy of .774 is 76% improvement of over the baseline. 
+# Compare each training mark's OOB prediction with its true label
+oob_accuracy <-
+  accuracy_vec(truth = marks_train$Trace.Type,
+               estimate = rf_engine$predicted)#0.774
+```
+
+Out-of-bag accuracy of our model is `r round(oob_accuracy, 2)`
+
+```{r}
+#| label: rf-one-importance
+#WHICH MEASURES MATTER MOST?
+# Gini importance from the fitted forest, reshaped long and sorted largest first
+rf_engine$importance |>
+  as_tibble(rownames = "feature") |>
+  ggplot(aes(x = fct_reorder(feature, MeanDecreaseGini),
+             y = MeanDecreaseGini)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(x = NULL,
+       y = "Mean decrease in Gini") +
+  theme_minimal()
+```
+
+```{r}
+#| label: rf-one-trees
+#HOW MANY TREES ARE ENOUGH?
+# OOB error after each of the 500 trees, reshaped long and plotted
+rf_engine$err.rate |>
+  as_tibble() |>
+  mutate(tree = row_number()) |>
+  pivot_longer(cols = -tree,
+               names_to = "class",
+               values_to = "oob_error") |>
+  ggplot(aes(x = tree, y = oob_error, colour = class)) +
+  geom_line(linewidth = 0.7) +
+  labs(x = "Number of trees",
+       y = "Out-of-bag error",
+       colour = NULL) +
+  theme_minimal()
+```
+
+```{r}
+#| label: cv
+#| fig-cap: OOB accuracy: Trample marks were misclassified as cut marks in 56% of cases, with an oob accuracy of 19% overall. Tooth and cut marks are identified consistently.
+
+# Deal the training marks into 10 folds, stratified by mark type
+set.seed(459)
+folds <- vfold_cv(marks_train, v = 10, strata = Trace.Type)
+
+# Accuracy (many others available)
+marks_metric <- metric_set(accuracy)
+
+# Same forest as above; train on 9 folds and test on the 10th, ten times; keep the predictions
+cv_fit <- workflow(marks_rec, rf_spec) |>
+  fit_resamples(folds,
+                metrics = marks_metric,
+                control = control_resamples(save_pred = TRUE))
+
+# Scores averaged over the 10 folds, then the confusion matrix of all out-of-fold predictions
+collect_metrics(cv_fit)
+collect_predictions(cv_fit) |> conf_mat(Trace.Type, .pred_class)
+```
+ 
